@@ -1,216 +1,156 @@
 import React, { useState } from 'react';
-import { 
-  Alert, 
-  StyleSheet, 
-  View, 
-  AppState, 
-  TextInput, 
-  TouchableOpacity, 
-  Text,
-  ActivityIndicator 
-} from 'react-native';
+import { Alert, StyleSheet, View, TextInput, TouchableOpacity, Text, ActivityIndicator, ScrollView } from 'react-native';
 import { supabase } from '../lib/supabase';
-
-// Tells Supabase Auth to continuously refresh the session automatically if
-// the app is in the foreground. When this is added, you will continue to receive
-// `onAuthStateChange` events with the `TOKEN_REFRESHED` or `SIGNED_OUT` event
-// if the user's session is terminated. This should only be registered once.
-AppState.addEventListener('change', (state) => {
-  if (state === 'active') {
-    supabase.auth.startAutoRefresh();
-  } else {
-    supabase.auth.stopAutoRefresh();
-  }
-});
 
 export default function Auth() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [phoneNumber, setPhoneNumber] = useState('');
   const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState(''); // Format: +216XXXXXXXX
+  const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
+  const [showOtp, setShowOtp] = useState(false);
 
-  // Generate fake email from username for Supabase Auth
-  const getEmailFromUsername = (user: string) => `${user}@noor.app`;
+  // Helper to ensure phone format is clean
+  const formatPhone = (num: string) => num.replace(/\s+/g, '');
 
-  async function signInWithUsername() {
+  async function handleSignUp() {
+    if (!phone.startsWith('+')) {
+      return Alert.alert('Format Error', 'Phone must start with + (e.g. +216)');
+    }
     setLoading(true);
-    const generatedEmail = getEmailFromUsername(username);
-    
-    const { error } = await supabase.auth.signInWithPassword({
-      email: generatedEmail,
-      password: password,
-    });
 
-    if (error) Alert.alert('Error', error.message);
-    setLoading(false);
-  }
-
-  async function signUpWithUsername() {
-    setLoading(true);
-    const generatedEmail = getEmailFromUsername(username);
-
-    const {
-      data: { session },
-      error,
-    } = await supabase.auth.signUp({
-      email: generatedEmail,
+    const { error } = await supabase.auth.signUp({
+      phone: formatPhone(phone),
       password: password,
       options: {
         data: {
-          username: username,
-          full_name: fullName,
-          phone_number: phoneNumber,
+          username: username.trim(),
+          full_name: fullName.trim(),
+          phone_number: formatPhone(phone),
         },
       },
     });
 
-    if (error) Alert.alert('Error', error.message);
-    if (!session) Alert.alert('Success', 'Account created! Please sign in.');
+    if (error) {
+      Alert.alert('Sign Up Error', error.message);
+      setLoading(false);
+    } else {
+      setShowOtp(true);
+      setLoading(false);
+      Alert.alert('OTP Sent', 'Check your phone for the verification code.');
+    }
+  }
+
+  async function verifyOtp() {
+    setLoading(true);
+    const { error } = await supabase.auth.verifyOtp({
+      phone: formatPhone(phone),
+      token: otp,
+      type: 'sms', // Important: keep as 'sms'
+    });
+
+    if (error) {
+      Alert.alert('Verification Failed', error.message);
+    }
     setLoading(false);
   }
 
+  async function handleLogin() {
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithPassword({
+      phone: formatPhone(phone),
+      password: password,
+    });
+    
+    if (error) {
+      // If error is "Phone not confirmed", show OTP screen
+      if (error.message.includes('confirmed')) {
+        setShowOtp(true);
+        Alert.alert('Verify Phone', 'Please verify your number first.');
+      } else {
+        Alert.alert('Login Error', error.message);
+      }
+    }
+    setLoading(false);
+  }
+
+  async function resendOtp() {
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithOtp({
+      phone: formatPhone(phone),
+    });
+    setLoading(false);
+    if (error) Alert.alert('Error', error.message);
+    else Alert.alert('Sent', 'New code requested.');
+  }
+
+  if (showOtp) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Enter Verification Code</Text>
+        <TextInput 
+          style={styles.input} 
+          placeholder="123456" 
+          value={otp} 
+          onChangeText={setOtp} 
+          keyboardType="number-pad" 
+        />
+        <TouchableOpacity style={styles.button} onPress={verifyOtp} disabled={loading}>
+          {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Verify Number</Text>}
+        </TouchableOpacity>
+        
+        <TouchableOpacity onPress={resendOtp} style={styles.link}>
+          <Text style={styles.linkText}>Didn't get a code? Resend</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={() => setShowOtp(false)} style={styles.link}>
+          <Text style={{color: '#666'}}>Back to Login</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.container}>
+    <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>{isSignUp ? 'Create Account' : 'Welcome Back'}</Text>
       
-      <View style={styles.inputContainer}>
-        <Text style={styles.label}>Username</Text>
-        <TextInput
-          style={styles.input}
-          onChangeText={(text) => setUsername(text)}
-          value={username}
-          placeholder="Enter username (min 3 chars)"
-          autoCapitalize="none"
-          editable={!loading}
-        />
-      </View>
-      
+      <TextInput 
+        style={styles.input} 
+        placeholder="Phone (+216...)" 
+        value={phone} 
+        onChangeText={setPhone} 
+        keyboardType="phone-pad" 
+        autoComplete="tel"
+      />
+
       {isSignUp && (
         <>
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Full Name</Text>
-            <TextInput
-              style={styles.input}
-              onChangeText={(text) => setFullName(text)}
-              value={fullName}
-              placeholder="Enter your full name"
-              autoCapitalize="words"
-              editable={!loading}
-            />
-          </View>
-          
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Phone Number</Text>
-            <TextInput
-              style={styles.input}
-              onChangeText={(text) => setPhoneNumber(text)}
-              value={phoneNumber}
-              placeholder="+971501234567"
-              autoCapitalize="none"
-              keyboardType="phone-pad"
-              editable={!loading}
-            />
-          </View>
+          <TextInput style={styles.input} placeholder="Username" value={username} onChangeText={setUsername} autoCapitalize="none" />
+          <TextInput style={styles.input} placeholder="Full Name" value={fullName} onChangeText={setFullName} />
         </>
       )}
 
-      <View style={styles.inputContainer}>
-        <Text style={styles.label}>Password</Text>
-        <TextInput
-          style={styles.input}
-          onChangeText={(text) => setPassword(text)}
-          value={password}
-          secureTextEntry={true}
-          placeholder="Enter password"
-          autoCapitalize="none"
-          editable={!loading}
-        />
-      </View>
-
-      <TouchableOpacity 
-        style={[styles.button, loading && styles.buttonDisabled]}
-        disabled={loading} 
-        onPress={() => isSignUp ? signUpWithUsername() : signInWithUsername()}
-      >
-        {loading ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>
-            {isSignUp ? 'Sign Up' : 'Sign In'}
-          </Text>
-        )}
+      <TextInput style={styles.input} placeholder="Password" value={password} onChangeText={setPassword} secureTextEntry />
+      
+      <TouchableOpacity style={styles.button} onPress={isSignUp ? handleSignUp : handleLogin} disabled={loading}>
+        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>{isSignUp ? 'Register' : 'Login'}</Text>}
       </TouchableOpacity>
-
-      <TouchableOpacity 
-        style={styles.linkButton}
-        disabled={loading} 
-        onPress={() => setIsSignUp(!isSignUp)}
-      >
-        <Text style={styles.linkButtonText}>
-          {isSignUp 
-            ? 'Already have an account? Sign in' 
-            : "Don't have an account? Sign up"}
-        </Text>
+      
+      <TouchableOpacity onPress={() => setIsSignUp(!isSignUp)} style={styles.link}>
+        <Text style={styles.linkText}>{isSignUp ? 'Already have an account? Sign in' : 'New here? Create account'}</Text>
       </TouchableOpacity>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 20,
-    backgroundColor: '#fff',
-    justifyContent: 'center',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    marginBottom: 30,
-    textAlign: 'center',
-    color: '#333',
-  },
-  inputContainer: {
-    marginBottom: 20,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 8,
-    color: '#333',
-  },
-  input: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 8,
-    padding: 15,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  button: {
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-    padding: 15,
-    alignItems: 'center',
-    marginTop: 10,
-  },
-  buttonDisabled: {
-    backgroundColor: '#ccc',
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  linkButton: {
-    marginTop: 15,
-    padding: 10,
-    alignItems: 'center',
-  },
-  linkButtonText: {
-    color: '#007AFF',
-    fontSize: 14,
-  },
+  container: { flexGrow: 1, justifyContent: 'center', padding: 25, backgroundColor: '#fff' },
+  title: { fontSize: 26, fontWeight: 'bold', marginBottom: 30, textAlign: 'center', color: '#111' },
+  input: { backgroundColor: '#f9f9f9', padding: 16, borderRadius: 12, marginBottom: 15, borderWidth: 1, borderColor: '#eee', fontSize: 16 },
+  button: { backgroundColor: '#007AFF', padding: 18, borderRadius: 12, alignItems: 'center', shadowColor: '#007AFF', shadowOpacity: 0.2, shadowRadius: 5 },
+  buttonText: { color: '#fff', fontSize: 17, fontWeight: 'bold' },
+  link: { marginTop: 25, alignItems: 'center' },
+  linkText: { color: '#007AFF', fontWeight: '500' }
 });
