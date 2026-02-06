@@ -8,8 +8,11 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { COLORS } from '../constants';
+import { supabase } from '../lib/supabase'; // Ensure this path is correct
 
 interface SignUpProps {
   onContinue: (nickname: string, phone: string) => void;
@@ -20,15 +23,51 @@ const SignUp: React.FC<SignUpProps> = ({ onContinue, onBack }) => {
   const [nickname, setNickname] = useState('');
   const [phone, setPhone] = useState('');
   const [pin, setPin] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const isValid = nickname.trim() && phone.trim() && pin.trim();
+  // Validation: Nickname exists, Phone is likely 8 digits (Tunisia standard), PIN exists
+  const isValid = nickname.trim() && phone.trim().length >= 8 && pin.trim();
+
+  const handleSignUp = async () => {
+    if (!isValid) return;
+
+    setIsLoading(true);
+    
+    // Formatting the Tunisian number correctly for Twilio
+    // If your input is "22123456", it becomes "+21622123456"
+    const formattedPhone = `+216${phone.trim()}`;
+
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        phone: formattedPhone,
+        options: {
+          // These metadata fields are sent to the 'auth.users' table 
+          // and handled by your SQL trigger to populate public.profiles
+          data: {
+            nickname: nickname,
+            security_pin: pin, // Optional: if you store this in your DB
+          },
+        },
+      });
+
+      if (error) throw error;
+
+      // If successful, navigate to Verify-OTP.tsx
+      onContinue(nickname, formattedPhone);
+      
+    } catch (error: any) {
+      Alert.alert('Sanctuary Entry Error', error.message || 'Could not send verification code.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <TouchableOpacity style={styles.backButton} onPress={onBack}>
           <Text style={styles.backIcon}>‹</Text>
         </TouchableOpacity>
@@ -51,6 +90,7 @@ const SignUp: React.FC<SignUpProps> = ({ onContinue, onBack }) => {
         </View>
 
         <View style={styles.formSection}>
+          {/* NICKNAME */}
           <View style={styles.inputGroup}>
             <Text style={styles.label}>NICKNAME</Text>
             <View style={styles.inputContainer}>
@@ -60,31 +100,35 @@ const SignUp: React.FC<SignUpProps> = ({ onContinue, onBack }) => {
                 onChangeText={setNickname}
                 placeholder="What should we call you?"
                 placeholderTextColor="#ccc"
+                autoCorrect={false}
               />
               <Text style={styles.inputIcon}>👤</Text>
             </View>
           </View>
 
+          {/* PHONE NUMBER */}
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>PHONE NUMBER</Text>
+            <Text style={styles.label}>TUNISIAN PHONE NUMBER</Text>
             <View style={styles.phoneRow}>
               <View style={styles.countryCode}>
-                <Text style={styles.countryCodeText}>🇦🇪 +971</Text>
+                <Text style={styles.countryCodeText}>🇹🇳 +216</Text>
               </View>
               <View style={[styles.inputContainer, styles.phoneInput]}>
                 <TextInput
                   style={styles.input}
                   value={phone}
                   onChangeText={setPhone}
-                  placeholder="5X XXX XXXX"
+                  placeholder="XX XXX XXX"
                   placeholderTextColor="#ccc"
                   keyboardType="phone-pad"
+                  maxLength={8}
                 />
                 <Text style={styles.inputIcon}>📱</Text>
               </View>
             </View>
           </View>
 
+          {/* SECURITY PIN */}
           <View style={styles.inputGroup}>
             <Text style={styles.label}>SECURITY PIN</Text>
             <View style={styles.inputContainer}>
@@ -107,13 +151,19 @@ const SignUp: React.FC<SignUpProps> = ({ onContinue, onBack }) => {
             <Text style={styles.privacyText}>🛡️ Privacy Protected Sanctuary</Text>
           </View>
           <TouchableOpacity
-            style={[styles.continueButton, !isValid && styles.continueButtonDisabled]}
-            onPress={() => isValid && onContinue(nickname, phone)}
-            disabled={!isValid}
+            style={[styles.continueButton, (!isValid || isLoading) && styles.continueButtonDisabled]}
+            onPress={handleSignUp}
+            disabled={!isValid || isLoading}
             activeOpacity={0.8}
           >
-            <Text style={styles.continueButtonText}>Verify My Identity</Text>
-            <Text style={styles.continueArrow}>→</Text>
+            {isLoading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <>
+                <Text style={styles.continueButtonText}>Verify My Identity</Text>
+                <Text style={styles.continueArrow}>→</Text>
+              </>
+            )}
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -129,6 +179,7 @@ const styles = StyleSheet.create({
   content: {
     padding: 24,
     paddingTop: 40,
+    paddingBottom: 40,
   },
   backButton: {
     width: 40,
@@ -233,7 +284,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   countryCode: {
-    width: 120,
+    width: 100, // Adjusted for Tunisia flag + code
     height: 64,
     backgroundColor: '#fff',
     borderRadius: 16,
@@ -246,7 +297,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   countryCodeText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
     color: COLORS.textDark,
   },
